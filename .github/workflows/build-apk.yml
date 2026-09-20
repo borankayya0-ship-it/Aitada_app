@@ -7,20 +7,29 @@ on:
 
 jobs:
   build:
+    name: Build Android APK
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
-          java-version: 17
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
 
-      - name: Write Gradle files
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Create Project Directory Structure
         run: |
           mkdir -p app/src/main/java/com/aitada/app app/src/main/res/xml app/src/main/res/values
+
+      - name: Write Gradle Files
+        run: |
           cat > settings.gradle <<'EOF'
           pluginManagement {
               repositories {
@@ -30,6 +39,7 @@ jobs:
               }
           }
           dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
               repositories {
                   google()
                   mavenCentral()
@@ -38,22 +48,28 @@ jobs:
           rootProject.name = "Aitada"
           include ':app'
           EOF
+
           cat > build.gradle <<'EOF'
           plugins {
               id 'com.android.application' version '8.5.0' apply false
           }
           EOF
+
           cat > gradle.properties <<'EOF'
-          org.gradle.jvmargs=-Xmx2g -XX:MaxMetaspaceSize=512m
+          org.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8
           android.useAndroidX=true
+          android.enableJetifier=true
           EOF
+
           cat > app/build.gradle <<'EOF'
           plugins {
               id 'com.android.application'
           }
+
           android {
               namespace 'com.aitada.app'
               compileSdk 34
+
               defaultConfig {
                   applicationId "com.aitada.app"
                   minSdk 24
@@ -61,30 +77,44 @@ jobs:
                   versionCode 1
                   versionName "1.0"
               }
+
               buildTypes {
                   release {
                       minifyEnabled false
+                      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+                  }
+                  debug {
+                      applicationIdSuffix ".debug"
+                      debuggable true
                   }
               }
+
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
                   targetCompatibility JavaVersion.VERSION_17
               }
           }
+
           dependencies {
+              implementation 'org.json:json:20231013'
           }
           EOF
 
-      - name: Write manifest and resources
+      - name: Write Manifest and Resources
         run: |
           cat > app/src/main/AndroidManifest.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
               <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
               <application
                   android:label="Aitada AI Agent"
                   android:icon="@android:drawable/sym_def_app_icon"
-                  android:allowBackup="true">
+                  android:allowBackup="true"
+                  android:theme="@android:style/Theme.DeviceDefault">
+
                   <activity
                       android:name=".MainActivity"
                       android:exported="true"
@@ -94,6 +124,7 @@ jobs:
                           <category android:name="android.intent.category.LAUNCHER" />
                       </intent-filter>
                   </activity>
+
                   <service
                       android:name=".AgentService"
                       android:exported="true"
@@ -105,9 +136,11 @@ jobs:
                           android:name="android.accessibilityservice"
                           android:resource="@xml/accessibility_service_config" />
                   </service>
+
               </application>
           </manifest>
           EOF
+
           cat > app/src/main/res/xml/accessibility_service_config.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
@@ -119,6 +152,7 @@ jobs:
               android:description="@string/service_desc"
               android:notificationTimeout="100" />
           EOF
+
           cat > app/src/main/res/values/strings.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
@@ -126,7 +160,7 @@ jobs:
           </resources>
           EOF
 
-      - name: Write Java source AiClient
+      - name: Write Java Source AiClient
         run: |
           cat > app/src/main/java/com/aitada/app/AiClient.java <<'EOF'
           package com.aitada.app;
@@ -146,6 +180,7 @@ jobs:
                   String url = base.trim();
                   if (url.endsWith("/")) url = url.substring(0, url.length() - 1);
                   if (!url.endsWith("/chat/completions")) url += "/chat/completions";
+
                   HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
                   c.setRequestMethod("POST");
                   c.setConnectTimeout(30000);
@@ -153,23 +188,29 @@ jobs:
                   c.setDoOutput(true);
                   c.setRequestProperty("Content-Type", "application/json");
                   c.setRequestProperty("Authorization", "Bearer " + key);
+
                   JSONObject body = new JSONObject();
                   body.put("model", model);
                   body.put("temperature", 0);
+
                   JSONArray msgs = new JSONArray();
                   JSONObject m1 = new JSONObject();
                   m1.put("role", "system");
                   m1.put("content", system);
+
                   JSONObject m2 = new JSONObject();
                   m2.put("role", "user");
                   m2.put("content", user);
+
                   msgs.put(m1);
                   msgs.put(m2);
                   body.put("messages", msgs);
+
                   OutputStream os = c.getOutputStream();
                   os.write(body.toString().getBytes("UTF-8"));
                   os.flush();
                   os.close();
+
                   int code = c.getResponseCode();
                   InputStream is = (code >= 400) ? c.getErrorStream() : c.getInputStream();
                   BufferedReader br = new BufferedReader(new InputStreamReader(is, "UTF-8"));
@@ -177,14 +218,18 @@ jobs:
                   String line;
                   while ((line = br.readLine()) != null) sb.append(line);
                   br.close();
-                  if (code >= 400) throw new IOException("HTTP " + code + ": " + sb.toString());
+
+                  if (code >= 400) {
+                      throw new IOException("HTTP " + code + ": " + sb.toString());
+                  }
+
                   JSONObject jo = new JSONObject(sb.toString());
                   return jo.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content");
               }
           }
           EOF
 
-      - name: Write Java source AgentService
+      - name: Write Java Source AgentService
         run: |
           cat > app/src/main/java/com/aitada/app/AgentService.java <<'EOF'
           package com.aitada.app;
@@ -202,12 +247,10 @@ jobs:
           import android.view.accessibility.AccessibilityEvent;
           import android.view.accessibility.AccessibilityNodeInfo;
           import org.json.JSONObject;
-
           import java.util.List;
           import java.util.Locale;
 
           public class AgentService extends AccessibilityService {
-
               public static volatile AgentService instance = null;
               public static volatile Listener listener = null;
               private Thread agentThread = null;
@@ -216,8 +259,7 @@ jobs:
                   void onLog(String msg);
               }
 
-              private static final String SYSTEM_PROMPT =
-                      "Sen bir Android telefonu OTONOM olarak kullanan yapay zeka ajanisin. " +
+              private static final String SYSTEM_PROMPT = "Sen bir Android telefonu OTONOM olarak kullanan yapay zeka ajanisin. " +
                       "Sana gorev ve ekranin erisilebilirlik agaci verilir. Her adimda SADECE gecerli bir JSON nesnesi dondur. " +
                       "Format: {\"action\":\"click|swipe|type|back|home|recents|launch|wait|done\",\"x\":0,\"y\":0," +
                       "\"direction\":\"up|down|left|right\",\"text\":\"...\",\"app\":\"...\",\"ms\":1500,\"reason\":\"kisa aciklama\"} " +
@@ -232,8 +274,7 @@ jobs:
                   instance = this;
                   AccessibilityServiceInfo info = getServiceInfo();
                   if (info != null) {
-                      info.flags |= AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
-                              | AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS;
+                      info.flags |= AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS | AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS;
                       info.eventTypes = AccessibilityEvent.TYPES_ALL_MASK;
                       info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
                       info.notificationTimeout = 100;
@@ -243,12 +284,10 @@ jobs:
               }
 
               @Override
-              public void onAccessibilityEvent(AccessibilityEvent event) {
-              }
+              public void onAccessibilityEvent(AccessibilityEvent event) {}
 
               @Override
-              public void onInterrupt() {
-              }
+              public void onInterrupt() {}
 
               @Override
               public boolean onUnbind(Intent intent) {
@@ -292,14 +331,12 @@ jobs:
                           AccessibilityNodeInfo root = getRootInActiveWindow();
                           if (root == null) {
                               log("Adim " + step + ": ekran agaci bekleniyor...");
-                              sleep(1500);
+                              Thread.sleep(1500);
                               continue;
                           }
                           StringBuilder screen = new StringBuilder();
                           describe(root, screen, 0, new int[]{0});
-                          String user = "GOREV: " + task + "\n\nEKRAN AGACI:\n" + screen.toString()
-                                  + "\nSON ADIMLAR:\n" + history.toString()
-                                  + "\n\nCevabin (sadece JSON):";
+                          String user = "GOREV: " + task + "\n\nEKRAN AGACI:\n" + screen.toString() + "\nSON ADIMLAR:\n" + history.toString() + "\n\nCevabin (sadece JSON):";
                           String resp = AiClient.chat(url, key, model, SYSTEM_PROMPT, user);
                           JSONObject act = parseJson(resp);
                           String type = act.optString("action", "").toLowerCase(Locale.US);
@@ -312,10 +349,10 @@ jobs:
                               log("GOREV TAMAMLANDI.");
                               return;
                           }
-                          sleep(1800);
+                          Thread.sleep(1800);
                       } catch (Exception e) {
                           log("Hata: " + (e.getMessage() == null ? e.toString() : e.getMessage()));
-                          sleep(2000);
+                          try { Thread.sleep(2000); } catch (InterruptedException ie) { return; }
                       }
                   }
                   log("Maksimum adim sayisina ulasildi, gorev durduruldu.");
@@ -331,10 +368,15 @@ jobs:
                       int w = getResources().getDisplayMetrics().widthPixels;
                       int h = getResources().getDisplayMetrics().heightPixels;
                       int x1, y1, x2, y2;
-                      if (dir.equals("up")) { x1 = w / 2; y1 = h * 3 / 4; x2 = w / 2; y2 = h / 4; }
-                      else if (dir.equals("down")) { x1 = w / 2; y1 = h / 4; x2 = w / 2; y2 = h * 3 / 4; }
-                      else if (dir.equals("left")) { x1 = w * 3 / 4; y1 = h / 2; x2 = w / 4; y2 = h / 2; }
-                      else { x1 = w / 4; y1 = h / 2; x2 = w * 3 / 4; y2 = h / 2; }
+                      if (dir.equals("up")) {
+                          x1 = w / 2; y1 = h * 3 / 4; x2 = w / 2; y2 = h / 4;
+                      } else if (dir.equals("down")) {
+                          x1 = w / 2; y1 = h / 4; x2 = w / 2; y2 = h * 3 / 4;
+                      } else if (dir.equals("left")) {
+                          x1 = w * 3 / 4; y1 = h / 2; x2 = w / 4; y2 = h / 2;
+                      } else {
+                          x1 = w / 4; y1 = h / 2; x2 = w * 3 / 4; y2 = h / 2;
+                      }
                       swipe(x1, y1, x2, y2);
                   } else if (type.equals("type") || type.equals("text")) {
                       String text = a.optString("text", "");
@@ -398,23 +440,9 @@ jobs:
                   String txt = "";
                   if (n.getText() != null) txt = n.getText().toString();
                   else if (n.getContentDescription() != null) txt = n.getContentDescription().toString();
+
                   StringBuilder flags = new StringBuilder();
                   if (n.isClickable()) flags.append("clickable ");
                   if (n.isEditable()) flags.append("editable ");
                   if (n.isScrollable()) flags.append("scrollable ");
-                  if (n.isFocused()) flags.append("focused ");
-                  for (int i = 0; i < depth; i++) sb.append("  ");
-                  sb.append("- ").append(simpleClass(n.getClassName()));
-                  if (txt.length() > 0) sb.append(" \"").append(trim(txt, 60)).append("\"");
-                  if (flags.length() > 0) sb.append(" [").append(flags.toString().trim()).append("]");
-                  sb.append(" box=(").append(r.left).append(",").append(r.top).append(",")
-                          .append(r.right).append(",").append(r.bottom).append(")\n");
-                  for (int i = 0; i < n.getChildCount(); i++) {
-                      describe(n.getChild(i), sb, depth + 1, count);
-                  }
-              }
-
-              private AccessibilityNodeInfo findEditable(AccessibilityNodeInfo n) {
-                  if (n == null) return null;
-                  if (n.isEditable()) return n;
-                  for (int i = 
+                  if (n.isFoc
