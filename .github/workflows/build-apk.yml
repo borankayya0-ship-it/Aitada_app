@@ -1,442 +1,124 @@
-name: Build APK
+name: Build Minecraft APK
 
 on:
-  workflow_dispatch:
   push:
     branches: [ main, master ]
+  workflow_dispatch:
 
 jobs:
   build:
-    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+    - name: Checkout Repository
+      uses: actions/checkout@v4
 
-      - name: Create Project Directory Structure
-        run: |
-          mkdir -p app/src/main/java/com/aitada/app app/src/main/res/xml app/src/main/res/values
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 18
 
-      - name: Write Gradle Files
-        run: |
-          cat > settings.gradle <<'EOF'
-          pluginManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-              }
-          }
-          dependencyResolutionManagement {
-              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-          }
-          rootProject.name = "Aitada"
-          include ':app'
-          EOF
+    - name: Create Web App Source
+      run: |
+        mkdir -p www
+        cat << 'EOF' > www/index.html
+        <!DOCTYPE html>
+        <html lang="tr">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+            <title>Minecraft Web Edition</title>
+            <style>
+                body {
+                    margin: 0;
+                    padding: 0;
+                    background: #111;
+                    color: white;
+                    font-family: Arial, sans-serif;
+                    overflow: hidden;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    height: 100vh;
+                }
+                #game-container {
+                    width: 100%;
+                    height: 85vh;
+                    background: #87CEEB;
+                    position: relative;
+                    overflow: hidden;
+                    border-bottom: 4px solid #333;
+                }
+                .block {
+                    width: 40px;
+                    height: 40px;
+                    background: #8B5A2B;
+                    border: 1px solid #5C4033;
+                    position: absolute;
+                    bottom: 0;
+                }
+                #ui {
+                    padding: 10px;
+                    text-align: center;
+                    background: #222;
+                    width: 100%;
+                    box-sizing: border-box;
+                }
+                button {
+                    background: #5C4033;
+                    color: white;
+                    border: 2px solid #8B5A2B;
+                    padding: 10px 20px;
+                    font-size: 16px;
+                    font-weight: bold;
+                    border-radius: 5px;
+                    cursor: pointer;
+                }
+                button:active {
+                    background: #8B5A2B;
+                }
+            </style>
+        </head>
+        <body>
+            <div id="game-container">
+                <div class="block" style="left: 40px;"></div>
+                <div class="block" style="left: 80px;"></div>
+                <div class="block" style="left: 120px; background: #2E8B57; border-color: #1e5c38;"></div>
+            </div>
+            <div id="ui">
+                <h3>Minecraft Mobil</h3>
+                <button onclick="alert('Blok yerleştirildi!')">Blok Koy</button>
+            </div>
+        </body>
+        </html>
+        EOF
 
-          cat > build.gradle <<'EOF'
-          plugins {
-              id 'com.android.application' version '8.5.0' apply false
-          }
-          EOF
+    - name: Set up Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
 
-          cat > gradle.properties <<'EOF'
-          org.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8
-          android.useAndroidX=true
-          android.enableJetifier=true
-          EOF
+    - name: Install Cordova
+      run: npm install -g cordova
 
-          cat > app/build.gradle <<'EOF'
-          plugins {
-              id 'com.android.application'
-          }
+    - name: Create Cordova Project
+      run: |
+        cordova create myApp com.minecraft.mobile MinecraftApp
+        cd myApp
+        rm -rf www
+        mv ../www www
+        cordova platform add android
 
-          android {
-              namespace 'com.aitada.app'
-              compileSdk 34
+    - name: Build APK with Cordova
+      run: |
+        cd myApp
+        cordova build android --release
 
-              defaultConfig {
-                  applicationId "com.aitada.app"
-                  minSdk 24
-                  targetSdk 34
-                  versionCode 1
-                  versionName "1.0"
-              }
-
-              buildTypes {
-                  release {
-                      minifyEnabled false
-                      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-                  }
-                  debug {
-                      applicationIdSuffix ".debug"
-                      debuggable true
-                  }
-              }
-
-              compileOptions {
-                  sourceCompatibility JavaVersion.VERSION_17
-                  targetCompatibility JavaVersion.VERSION_17
-              }
-          }
-
-          dependencies {
-              implementation 'org.json:json:20231013'
-          }
-          EOF
-
-      - name: Write Manifest and Resources
-        run: |
-          cat > app/src/main/AndroidManifest.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-
-              <uses-permission android:name="android.permission.INTERNET" />
-              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-
-              <application
-                  android:label="Aitada AI Agent"
-                  android:icon="@android:drawable/sym_def_app_icon"
-                  android:allowBackup="true"
-                  android:theme="@android:style/Theme.DeviceDefault">
-
-                  <activity
-                      android:name=".MainActivity"
-                      android:exported="true"
-                      android:configChanges="orientation|screenSize|keyboardHidden">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
-                      </intent-filter>
-                  </activity>
-
-                  <service
-                      android:name=".AgentService"
-                      android:exported="true"
-                      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
-                      <intent-filter>
-                          <action android:name="android.accessibilityservice.AccessibilityService" />
-                      </intent-filter>
-                      <meta-data
-                          android:name="android.accessibilityservice"
-                          android:resource="@xml/accessibility_service_config" />
-                  </service>
-
-              </application>
-          </manifest>
-          EOF
-
-          cat > app/src/main/res/xml/accessibility_service_config.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-              android:accessibilityEventTypes="typeAllMask"
-              android:accessibilityFeedbackType="feedbackGeneric"
-              android:accessibilityFlags="flagRetrieveInteractiveWindows|flagIncludeNotImportantViews"
-              android:canPerformGestures="true"
-              android:canRetrieveWindowContent="true"
-              android:description="@string/service_desc"
-              android:notificationTimeout="100" />
-          EOF
-
-          cat > app/src/main/res/values/strings.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <string name="service_desc">Aitada ajaninin ekrani okuyup otonom dokunmatik islemler yapmasini saglar.</string>
-          </resources>
-          EOF
-
-      - name: Write Java Source AiClient
-        run: |
-          cat > app/src/main/java/com/aitada/app/AiClient.java <<'EOF'
-          package com.aitada.app;
-
-          import java.io.BufferedReader;
-          import java.io.IOException;
-          import java.io.InputStream;
-          import java.io.InputStreamReader;
-          import java.io.OutputStream;
-          import java.net.HttpURLConnection;
-          import java.net.URL;
-          import org.json.JSONArray;
-          import org.json.JSONObject;
-
-          public class AiClient {
-              public static String chat(String base, String key, String model, String system, String user) throws IOException {
-                  String url = base.trim();
-                  if (url.endsWith("/")) url = url.substring(0, url.length() - 1);
-                  if (!url.endsWith("/chat/completions")) url += "/chat/completions";
-
-                  HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
-                  c.setRequestMethod("POST");
-                  c.setConnectTimeout(30000);
-                  c.setReadTimeout(120000);
-                  c.setDoOutput(true);
-                  c.setRequestProperty("Content-Type", "application/json");
-                  c.setRequestProperty("Authorization", "Bearer " + key);
-
-                  JSONObject body = new JSONObject();
-                  body.put("model", model);
-                  body.put("temperature", 0);
-
-                  JSONArray msgs = new JSONArray();
-                  JSONObject m1 = new JSONObject();
-                  m1.put("role", "system");
-                  m1.put("content", system);
-
-                  JSONObject m2 = new JSONObject();
-                  m2.put("role", "user");
-                  m2.put("content", user);
-
-                  msgs.put(m1);
-                  msgs.put(m2);
-                  body.put("messages", msgs);
-
-                  OutputStream os = c.getOutputStream();
-                  os.write(body.toString().getBytes("UTF-8"));
-                  os.flush();
-                  os.close();
-
-                  int code = c.getResponseCode();
-                  InputStream is = (code >= 400) ? c.getErrorStream() : c.getInputStream();
-                  BufferedReader br = new BufferedReader(new InputStreamReader(is, "UTF-8"));
-                  StringBuilder sb = new StringBuilder();
-                  String line;
-                  while ((line = br.readLine()) != null) sb.append(line);
-                  br.close();
-
-                  if (code >= 400) {
-                      throw new IOException("HTTP " + code + ": " + sb.toString());
-                  }
-
-                  JSONObject jo = new JSONObject(sb.toString());
-                  return jo.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content");
-              }
-          }
-          EOF
-
-      - name: Write Java Source AgentService
-        run: |
-          cat > app/src/main/java/com/aitada/app/AgentService.java <<'EOF'
-          package com.aitada.app;
-
-          import android.accessibilityservice.AccessibilityService;
-          import android.accessibilityservice.AccessibilityServiceInfo;
-          import android.accessibilityservice.GestureDescription;
-          import android.content.Intent;
-          import android.content.pm.PackageManager;
-          import android.content.pm.ResolveInfo;
-          import android.graphics.Path;
-          import android.graphics.Rect;
-          import android.os.Bundle;
-          import android.util.Log;
-          import android.view.accessibility.AccessibilityEvent;
-          import android.view.accessibility.AccessibilityNodeInfo;
-          import org.json.JSONObject;
-          import java.util.List;
-          import java.util.Locale;
-
-          public class AgentService extends AccessibilityService {
-              public static volatile AgentService instance = null;
-              public static volatile Listener listener = null;
-              private Thread agentThread = null;
-
-              public interface Listener {
-                  void onLog(String msg);
-              }
-
-              private static final String SYSTEM_PROMPT = "Sen bir Android telefonu OTONOM olarak kullanan yapay zeka ajanisin. " +
-                      "Sana gorev ve ekranin erisilebilirlik agaci verilir. Her adimda SADECE gecerli bir JSON nesnesi dondur. " +
-                      "Format: {\"action\":\"click|swipe|type|back|home|recents|launch|wait|done\",\"x\":0,\"y\":0," +
-                      "\"direction\":\"up|down|left|right\",\"text\":\"...\",\"app\":\"...\",\"ms\":1500,\"reason\":\"kisa aciklama\"} " +
-                      "Kurallar: click icin hedef dugumun box koordinatlarinin merkezini x ve y olarak ver. " +
-                      "Bir uygulamayi acman istenirse once launch kullan ve app alanina uygulama adini yaz. " +
-                      "Liste kaydirma gerekirse swipe kullan. Gorev tamamen bitince action=done dondur. " +
-                      "Markdown yok, aciklama yok, sadece JSON.";
-
-              @Override
-              public void onServiceConnected() {
-                  super.onServiceConnected();
-                  instance = this;
-                  AccessibilityServiceInfo info = getServiceInfo();
-                  if (info != null) {
-                      info.flags |= AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS | AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS;
-                      info.eventTypes = AccessibilityEvent.TYPES_ALL_MASK;
-                      info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
-                      info.notificationTimeout = 100;
-                      setServiceInfo(info);
-                  }
-                  log("Erisilebilirlik servisi baglandi.");
-              }
-
-              @Override
-              public void onAccessibilityEvent(AccessibilityEvent event) {}
-
-              @Override
-              public void onInterrupt() {}
-
-              @Override
-              public boolean onUnbind(Intent intent) {
-                  instance = null;
-                  return super.onUnbind(intent);
-              }
-
-              public void log(String msg) {
-                  Log.i("Aitada", msg);
-                  Listener l = listener;
-                  if (l != null) l.onLog(msg);
-              }
-
-              public synchronized void startTask(final String task, final String url, final String key, final String model) {
-                  if (agentThread != null && agentThread.isAlive()) {
-                      log("Zaten calisan bir gorev var.");
-                      return;
-                  }
-                  agentThread = new Thread(new Runnable() {
-                      @Override
-                      public void run() {
-                          runLoop(task, url, key, model);
-                      }
-                  });
-                  agentThread.setDaemon(true);
-                  agentThread.start();
-              }
-
-              public void stopTask() {
-                  if (agentThread != null) agentThread.interrupt();
-                  agentThread = null;
-                  log("Gorev kullanici tarafindan durduruldu.");
-              }
-
-              private void runLoop(String task, String url, String key, String model) {
-                  final int maxSteps = 25;
-                  StringBuilder history = new StringBuilder();
-                  for (int step = 1; step <= maxSteps; step++) {
-                      if (Thread.currentThread().isInterrupted()) return;
-                      try {
-                          AccessibilityNodeInfo root = getRootInActiveWindow();
-                          if (root == null) {
-                              log("Adim " + step + ": ekran agaci bekleniyor...");
-                              Thread.sleep(1500);
-                              continue;
-                          }
-                          StringBuilder screen = new StringBuilder();
-                          describe(root, screen, 0, new int[]{0});
-                          String user = "GOREV: " + task + "\n\nEKRAN AGACI:\n" + screen.toString() + "\nSON ADIMLAR:\n" + history.toString() + "\n\nCevabin (sadece JSON):";
-                          String resp = AiClient.chat(url, key, model, SYSTEM_PROMPT, user);
-                          JSONObject act = parseJson(resp);
-                          String type = act.optString("action", "").toLowerCase(Locale.US);
-                          String reason = act.optString("reason", "");
-                          log("Adim " + step + ": " + type + (reason.length() > 0 ? " (" + reason + ")" : ""));
-                          history.append(step).append(": ").append(type).append(" ").append(reason).append("\n");
-                          if (history.length() > 1500) history.delete(0, history.length() - 1500);
-                          boolean done = execute(act);
-                          if (done) {
-                              log("GOREV TAMAMLANDI.");
-                              return;
-                          }
-                          Thread.sleep(1800);
-                      } catch (Exception e) {
-                          log("Hata: " + (e.getMessage() == null ? e.toString() : e.getMessage()));
-                          try { Thread.sleep(2000); } catch (InterruptedException ie) { return; }
-                      }
-                  }
-                  log("Maksimum adim sayisina ulasildi, gorev durduruldu.");
-              }
-
-              private boolean execute(JSONObject a) throws Exception {
-                  String type = a.optString("action", "").toLowerCase(Locale.US);
-                  if (type.equals("done")) return true;
-                  if (type.equals("click") || type.equals("tap")) {
-                      tap(a.optInt("x", 0), a.optInt("y", 0));
-                  } else if (type.equals("swipe") || type.equals("scroll")) {
-                      String dir = a.optString("direction", "down");
-                      int w = getResources().getDisplayMetrics().widthPixels;
-                      int h = getResources().getDisplayMetrics().heightPixels;
-                      int x1, y1, x2, y2;
-                      if (dir.equals("up")) {
-                          x1 = w / 2; y1 = h * 3 / 4; x2 = w / 2; y2 = h / 4;
-                      } else if (dir.equals("down")) {
-                          x1 = w / 2; y1 = h / 4; x2 = w / 2; y2 = h * 3 / 4;
-                      } else if (dir.equals("left")) {
-                          x1 = w * 3 / 4; y1 = h / 2; x2 = w / 4; y2 = h / 2;
-                      } else {
-                          x1 = w / 4; y1 = h / 2; x2 = w * 3 / 4; y2 = h / 2;
-                      }
-                      swipe(x1, y1, x2, y2);
-                  } else if (type.equals("type") || type.equals("text")) {
-                      String text = a.optString("text", "");
-                      AccessibilityNodeInfo root = getRootInActiveWindow();
-                      AccessibilityNodeInfo target = null;
-                      if (root != null) {
-                          target = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
-                          if (target == null) target = findEditable(root);
-                      }
-                      if (target != null) {
-                          Bundle args = new Bundle();
-                          args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text);
-                          target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args);
-                          log("Yazi yazildi: " + text);
-                      } else {
-                          log("Yazilacak alan bulunamadi.");
-                      }
-                  } else if (type.equals("back")) {
-                      performGlobalAction(GLOBAL_ACTION_BACK);
-                  } else if (type.equals("home")) {
-                      performGlobalAction(GLOBAL_ACTION_HOME);
-                  } else if (type.equals("recents")) {
-                      performGlobalAction(GLOBAL_ACTION_RECENTS);
-                  } else if (type.equals("launch") || type.equals("open")) {
-                      String app = a.optString("app", "").toLowerCase(Locale.US);
-                      PackageManager pm = getPackageManager();
-                      Intent main = new Intent(Intent.ACTION_MAIN, null);
-                      main.addCategory(Intent.CATEGORY_LAUNCHER);
-                      List<ResolveInfo> infos = pm.queryIntentActivities(main, 0);
-                      String pkg = null;
-                      for (ResolveInfo ri : infos) {
-                          String label = ri.loadLabel(pm).toString().toLowerCase(Locale.US);
-                          if (label.contains(app) || app.contains(label)) {
-                              pkg = ri.activityInfo.packageName;
-                              break;
-                          }
-                      }
-                      if (pkg != null) {
-                          Intent li = pm.getLaunchIntentForPackage(pkg);
-                          if (li != null) {
-                              li.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                              startActivity(li);
-                              log("Uygulama acildi: " + pkg);
-                          }
-                      } else {
-                          log("Uygulama bulunamadi: " + app);
-                      }
-                  } else if (type.equals("wait")) {
-                      Thread.sleep(a.optInt("ms", 1500));
-                  } else {
-                      log("Bilinmeyen aksiyon: " + type);
-                  }
-                  return false;
-              }
-
-              private void describe(AccessibilityNodeInfo n, StringBuilder sb, int depth, int[] count) {
-                  if (n == null || depth > 14 || count[0] > 140) return;
-                  count[0]++;
-                  Rect r = new Rect();
-                  n.getBoundsInScreen(r);
-                  String txt = "";
-                  if (n.getText() != null) txt = n.getText().toString();
-                  else if (n.getContentDescription() != null) txt = n.getContentDescription().toString();
-
-                  StringBuilder flags = new StringBuilder();
-                  if (n.isClickable()) flags.append("clickable ");
-                  if (n.isEditable()) flags.append("editable ");
-                  if (n.isScrollable()) flags.append("scrollable ");
-                  if (n.isFocused()) flags.append("focused ");
-
-                  for (int i = 0; i < depth; i++) sb.append(" ");
-                  sb.append("- ").append(simpleClass(n.getClassName()));
-                  if (txt.length() > 0) sb.append(" \"").append(trim(txt, 
+    - name: Upload APK Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: Minecraft-APK
+        path: myApp/platforms/android/app/build/outputs/apk/release/app-release-unsigned.apk
+        
